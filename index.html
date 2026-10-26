@@ -179,7 +179,7 @@ input,select{font-family:inherit;}
 
 .cards-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px;}
 .card{background:var(--panel);border-radius:var(--radius);padding:18px;border:1px solid var(--border);}
-.card .num{font-size:26px;font-weight:700;}
+.card .num{font-size:clamp(18px,2.1vw,26px);font-weight:700;white-space:nowrap;}
 .card .label{color:var(--ink-soft);font-size:13px;margin-top:4px;}
 
 .table-wrap{overflow-x:auto;}
@@ -408,6 +408,14 @@ input,select{font-family:inherit;}
 /* Angka Rupiah satu baris (tidak turun ke bawah "Rp") */
 .rp-table td.num,.rp-table th.num,.rp-table tfoot td.num{white-space:nowrap;}
 .rp-table tfoot td.num{padding-left:6px;padding-right:6px;font-size:12px;}
+
+/* Cetak 1 slip dari Riwayat: hanya #unduhPrintRoot yang tampil */
+#unduhPrintRoot{display:none;}
+.pdf-capture .cetak-page{margin:0 !important;box-shadow:none !important;}
+@media print{
+  body.mode-unduh > *:not(#unduhPrintRoot){display:none !important;}
+  body.mode-unduh #unduhPrintRoot{display:block !important;}
+}
 
 /* LAMPIRAN — halaman per staff */
 .lampiran-sheet{max-width:820px;margin:0 auto;font-size:12.5px;padding:20px 28px;color:var(--rp-ink);}
@@ -738,7 +746,7 @@ tr.row-resign td:not(:last-child){opacity:.6;}
 
       <div class="panel" id="laporanPreviewPanel" style="display:none">
         <div class="slip-actions">
-          <button class="btn-primary" id="btnPrintLaporan">🖨️ Cetak / Simpan Semua sebagai PDF</button>
+          <button class="btn-primary" id="btnPrintLaporan">⬇️ Unduh Semua sebagai PDF</button>
         </div>
         <div id="laporanContainer" class="report-canvas"></div>
       </div>
@@ -1469,6 +1477,11 @@ function simpanSuratSakit() {
   const tglSelesai = document.getElementById("fSakitSelesai").value;
   if (!personaliaId || !tglMulai || !tglSelesai) { alert("Lengkapi semua data"); return; }
   const jumlahHari = hitungJumlahHari(tglMulai, tglSelesai);
+  const ketBaru = document.getElementById("fSakitKeterangan").value.trim();
+  if (DB.suratSakit.some(x => x.personaliaId === personaliaId && x.tglMulai === tglMulai && x.tglSelesai === tglSelesai && (x.keterangan || "").trim() === ketBaru)) {
+    alert("Surat sakit dengan tanggal & keterangan yang sama sudah tercatat. Hapus yang lama dulu bila ingin mengganti.");
+    return;
+  }
   const data = {
     id: uid(),
     personaliaId,
@@ -1483,7 +1496,6 @@ function simpanSuratSakit() {
   const p = getPersonaliaById(personaliaId);
   if (p) {
     p.sakitTerpakai = (Number(p.sakitTerpakai) || 0) + jumlahHari;
-    saveDB();
     renderPersonaliaTable();
   }
   saveDB();
@@ -2800,11 +2812,11 @@ function renderRiwayatTable() {
       <td>${formatRupiah(s.thp)}</td>
       <td>${new Date(s.dibuatPada).toLocaleString("id-ID")}</td>
       <td class="riwayat-actions">
-        <button class="btn-icon" data-action="naik-slip" data-id="${s.id}" title="Pindah urutan ke atas" ${i === 0 ? "disabled" : ""}>▲</button>
-        <button class="btn-icon" data-action="turun-slip" data-id="${s.id}" title="Pindah urutan ke bawah" ${i === list.length - 1 ? "disabled" : ""}>▼</button>
-        <button class="btn-icon" data-action="lihat-slip" data-id="${s.id}">Lihat</button>
-        <button class="btn-icon" data-action="email-slip" data-id="${s.id}" title="Kirim slip ini ke email pegawai">✉ Email</button>
-        <button class="btn-danger" data-action="hapus-slip" data-id="${s.id}">Hapus</button>
+        <button class="btn-icon" data-action="lihat-slip" data-id="${s.id}" title="Lihat slip" aria-label="Lihat slip" style="display:inline-flex;align-items:center;justify-content:center;padding:7px 10px"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <button class="btn-icon" data-action="unduh-slip" data-id="${s.id}" title="Download slip lengkap + lampiran (PDF)" aria-label="Download slip lengkap + lampiran" style="display:inline-flex;align-items:center;justify-content:center;padding:7px 10px"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></svg></button>
+        <button class="btn-icon" data-action="salin-subjek" data-id="${s.id}" title="Salin subjek email" aria-label="Salin subjek email" style="display:inline-flex;align-items:center;justify-content:center;padding:7px 10px"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/><path d="M17 15l2 2 3-4"/></svg></button>
+        <button class="btn-icon" data-action="salin-isi" data-id="${s.id}" title="Salin isi email" aria-label="Salin isi email" style="display:inline-flex;align-items:center;justify-content:center;padding:7px 10px"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+        <button class="btn-danger" data-action="hapus-slip" data-id="${s.id}" title="Hapus slip" aria-label="Hapus slip" style="display:inline-flex;align-items:center;justify-content:center;padding:7px 10px"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button>
       </td>`;
     tbody.appendChild(tr);
   });
@@ -2879,6 +2891,45 @@ function kirimEmailSlipRiwayat(id) {
   window.location.href = mailtoUrl;
 }
 
+const PERUSAHAAN_EMAIL = "PT Kamil Group Indonesia";
+function teksEmailSlip(s, jenis) {
+  // "OKTOBER 2026" -> "Oktober 2026"
+  const periode = String(s.periodeLabel || "").trim().toLowerCase().replace(/(^|\s)([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase());
+  if (jenis === "subjek") return `Slip Gaji Periode ${periode} - ${PERUSAHAAN_EMAIL}`;
+  return [
+    `Yth. Bapak/Ibu ${s.nama},`,
+    ``,
+    `Terlampir kami sampaikan slip gaji untuk periode ${periode}.`,
+    ``,
+    `Mohon untuk memeriksa rincian penghasilan dan potongan yang tercantum pada slip gaji tersebut. Apabila terdapat pertanyaan atau ketidaksesuaian data, silakan menghubungi bagian Finance.`,
+    ``,
+    `Kami mengucapkan terima kasih atas kontribusi dan dedikasi yang telah diberikan kepada ${PERUSAHAAN_EMAIL}`,
+    ``,
+    `Regards,`,
+    ``,
+    `Finance & HR Department`,
+    PERUSAHAAN_EMAIL
+  ].join("\n");
+}
+async function salinEmailSlip(id, jenis) {
+  const s = DB.riwayatSlip.find(x => x.id === id);
+  if (!s) return;
+  const teks = teksEmailSlip(s, jenis);
+  let ok = false;
+  try { await navigator.clipboard.writeText(teks); ok = true; } catch (e) {}
+  if (!ok) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = teks; ta.style.cssText = "position:fixed;left:-9999px;top:0;";
+      document.body.appendChild(ta); ta.select();
+      ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch (e) {}
+  }
+  showToastNow(ok ? (jenis === "subjek" ? "Subjek email disalin" : "Isi email disalin") : "Gagal menyalin. Salin manual dari kotak yang muncul.");
+  if (!ok) prompt("Salin teks ini:", teks);
+}
+
 function hapusSlipRiwayat(id) {
   const s = DB.riwayatSlip.find(x => x.id === id);
   if (!s) return;
@@ -2934,26 +2985,62 @@ function populateLaporanPeriodeSelect() {
   }
 }
 
-// Cari surat sakit (dengan foto) milik seorang pegawai yang relevan untuk sebuah slip,
-// yaitu yang tanggal mulainya jatuh setelah cut off slip SEBELUMNYA (pegawai yang sama)
-// sampai dengan cut off slip ini sendiri.
-function getSuratSakitUntukSlip(slip) {
-  const cutOffCur = slip.cutOff ? parseDateFlexible(slip.cutOff) : null;
-
-  const cutOffSlipLain = DB.riwayatSlip
-    .filter(x => x.personaliaId === slip.personaliaId && x.id !== slip.id && x.cutOff)
-    .map(x => parseDateFlexible(x.cutOff))
-    .filter(d => d && (!cutOffCur || d < cutOffCur));
-  const prevCutOff = cutOffSlipLain.length ? new Date(Math.max(...cutOffSlipLain.map(d => d.getTime()))) : null;
-
-  return DB.suratSakit.filter(s => {
-    if (s.personaliaId !== slip.personaliaId) return false;
-    const tgl = parseDateFlexible(s.tglMulai);
-    if (!tgl) return false;
-    if (cutOffCur && tgl > cutOffCur) return false;
-    if (prevCutOff && tgl <= prevCutOff) return false;
+// Buang surat sakit dobel untuk lampiran/PDF: sama pegawai + tanggal mulai + tanggal selesai
+// (format tanggal dinormalisasi, keterangan TIDAK ikut dibandingkan), atau foto yang persis sama.
+// Bila dobel, pilih entri yang punya foto lalu yang keterangannya terisi.
+function dedupSuratSakit(list) {
+  const iso = v => { const d = parseDateFlexible(v); return d ? isoDate(d) : String(v || "").trim(); };
+  const skor = x => (x.fotoUrl ? 2 : 0) + (((x.keterangan || "").trim()) ? 1 : 0);
+  const peta = new Map();
+  list.forEach(x => {
+    const k = [x.personaliaId, iso(x.tglMulai), iso(x.tglSelesai)].join("|");
+    const lama = peta.get(k);
+    if (!lama || skor(x) > skor(lama)) peta.set(k, x);
+  });
+  const fotoSudah = new Set();
+  return Array.from(peta.values()).filter(x => {
+    if (!x.fotoUrl) return true;
+    if (fotoSudah.has(x.fotoUrl)) return false;
+    fotoSudah.add(x.fotoUrl);
     return true;
   });
+}
+
+// Surat sakit untuk slip/laporan: HANYA yang tanggal mulainya berada di dalam rentang cut off slip itu
+// (mis. laporan Oktober = 26 Sep s/d 25 Okt). Bila slip lama belum menyimpan tanggal awal cut off,
+// awalnya dihitung dari sehari setelah cut off slip sebelumnya milik pegawai yang sama.
+function getSuratSakitUntukSlip(slip) {
+  const ymd = v => {
+    if (!v) return "";
+    const t = String(v).trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
+    const d = parseDateFlexible(t);
+    return d ? isoDate(d) : "";
+  };
+  const akhir = ymd(slip.cutOff);
+  let awal = ymd(slip.cutOffMulai);
+  if (!awal && akhir) {
+    const prev = DB.riwayatSlip
+      .filter(x => x.personaliaId === slip.personaliaId && x.id !== slip.id && x.cutOff)
+      .map(x => ymd(x.cutOff))
+      .filter(d => d && d < akhir)
+      .sort().pop();
+    if (prev) {
+      const d = parseDateFlexible(prev);
+      d.setDate(d.getDate() + 1);
+      awal = isoDate(d);
+    }
+  }
+  const terpilih = DB.suratSakit.filter(x => {
+    if (x.personaliaId !== slip.personaliaId) return false;
+    const t = ymd(x.tglMulai);
+    if (!t) return false;
+    if (akhir && t > akhir) return false;
+    if (awal && t < awal) return false;
+    return true;
+  });
+  return dedupSuratSakit(terpilih)
+    .sort((x, y) => ymd(x.tglMulai).localeCompare(ymd(y.tglMulai)));
 }
 
 function buildCoverHtml(periodeLabel, slips) {
@@ -3160,6 +3247,155 @@ function urutanDefaultLaporan(slip) {
   if (i > -1) return i;
   const j = DB.personalia.findIndex(p => p.id === slip.personaliaId);
   return 100 + (j > -1 ? j : 9999);
+}
+
+/* Download slip lengkap 1 pegawai (Riwayat > Aksi > Download).
+   Memakai bahan yang SAMA dengan fitur Laporan Periode (buildSlipSheetHtml + buildLampiranStaffHtml) dan
+   mesin cetak browser yang sama, tapi hanya untuk 1 pegawai: slip + lampiran miliknya saja, disatukan.
+   Hasilnya identik dengan Laporan (vektor, tajam, tanpa halaman berlebih). Nama file otomatis terisi
+   "Slip Gaji - Nama - Periode"; pilih "Simpan sebagai PDF" di dialog cetak. */
+function tungguGambar(root) {
+  const imgs = Array.from(root.querySelectorAll("img"));
+  return Promise.all(imgs.map(im => (im.complete && im.naturalWidth) ? 0 : new Promise(r => { im.onload = im.onerror = r; })));
+}
+// Format nama file: "Slip Gaji - Nama Pegawai - Oktober 2026"
+function namaFileSlip(s) {
+  const periode = String(s.periodeLabel || "").toLowerCase().replace(/(^|\s)(\S)/g, (m, a, b) => a + b.toUpperCase());
+  return `Slip Gaji - ${s.nama} - ${periode}`.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+}
+let __judulAsliDokumen = null;
+function bersihkanCetakSlip() {
+  const lama = document.getElementById("unduhPrintRoot");
+  if (lama && lama.parentNode) lama.parentNode.removeChild(lama);
+  document.body.classList.remove("mode-unduh");
+  if (__judulAsliDokumen !== null) { document.title = __judulAsliDokumen; __judulAsliDokumen = null; }
+}
+async function unduhSlipViaCetak(id) {
+  const s = DB.riwayatSlip.find(x => x.id === id);
+  if (!s) return;
+  bersihkanCetakSlip();
+  try {
+    const wadah = document.createElement("div");
+    wadah.id = "unduhPrintRoot";
+    wadah.className = "report-canvas";
+    // urutan sama dengan Laporan Periode: slip pegawai lalu lampiran pegawai itu
+    wadah.innerHTML = `<div class="cetak-page">${buildSlipSheetHtml(s)}</div>` + buildLampiranStaffHtml(s);
+    document.body.appendChild(wadah);
+    if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (e) {} }
+    await tungguGambar(wadah);
+    __judulAsliDokumen = document.title;
+    document.title = namaFileSlip(s);   // dipakai browser sebagai nama file default saat "Simpan sebagai PDF"
+    document.body.classList.add("mode-unduh");
+    window.addEventListener("afterprint", bersihkanCetakSlip, { once: true });
+    window.print();
+  } catch (err) {
+    console.error("Gagal menyiapkan cetak slip:", err);
+    bersihkanCetakSlip();
+    alert("Gagal menyiapkan PDF: " + (err && err.message ? err.message : err));
+  }
+}
+
+// ---- Unduh langsung sebagai file PDF (tanpa dialog cetak). Isi & struktur sama persis dengan versi cetak. ----
+function muatSkrip(url) {
+  return new Promise((ok, gagal) => {
+    const el = document.createElement("script");
+    el.src = url; el.onload = ok; el.onerror = () => gagal(new Error("Gagal memuat " + url));
+    document.head.appendChild(el);
+  });
+}
+async function siapkanLibPdf() {
+  if (!window.html2canvas) await muatSkrip("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
+  if (!(window.jspdf && window.jspdf.jsPDF)) await muatSkrip("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+}
+async function bangunPdfDariHtml(html, namaFile, toast, hostRef) {
+    await siapkanLibPdf();
+    const host = document.createElement("div");
+    host.className = "report-canvas pdf-capture";
+    host.style.cssText = "position:fixed;left:-10000px;top:0;width:210mm;background:#fff;";
+    host.innerHTML = html;
+    document.body.appendChild(host);
+    hostRef.el = host;
+    if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (e) {} }
+    await tungguGambar(host);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const PW = 210, PH = 297;
+    const halaman = Array.from(host.querySelectorAll(".cetak-page"));
+    let pertama = true;
+    let no = 0;
+    for (const el of halaman) {
+      no++; if (halaman.length > 3) toast(`Menyiapkan PDF… (${no}/${halaman.length})`);
+      const sk = Math.max(2, Math.min(4, 14000 / Math.max(el.scrollHeight, 1)));
+      const canvas = await html2canvas(el, { scale: sk, backgroundColor: "#ffffff", useCORS: true, logging: false });
+      const pxPerMm = canvas.width / PW;
+      const skala = canvas.width / el.offsetWidth;
+      const MARGIN = 12;                       // margin atas/bawah halaman lanjutan (mm)
+      const topEl = el.getBoundingClientRect().top;
+      // titik potong aman: batas bawah baris tabel & blok utama (agar baris tidak terpotong)
+      const kandidat = Array.from(el.querySelectorAll("tr, .lampiran-sheet > *, .cetak-page > * > *"))
+        .map(n => (n.getBoundingClientRect().bottom - topEl) * skala)
+        .filter(v => v > 0).sort((m, n) => m - n);
+      let y = 0, awal = true;
+      while (y < canvas.height - 2) {
+        const atasMm = awal ? 0 : MARGIN;
+        const sisaMm = PH - atasMm - MARGIN;   // sisakan blank footer normal
+        const batas = y + Math.floor(sisaMm * pxPerMm);
+        let akhir = canvas.height;
+        if (canvas.height - y > Math.floor((PH - atasMm) * pxPerMm) + 2) {
+          akhir = batas;
+          for (let i = kandidat.length - 1; i >= 0; i--) { if (kandidat[i] <= batas && kandidat[i] > y + 20) { akhir = Math.floor(kandidat[i]); break; } }
+        }
+        const h = akhir - y;
+        const potong = document.createElement("canvas");
+        potong.width = canvas.width; potong.height = h;
+        const c = potong.getContext("2d");
+        c.fillStyle = "#fff"; c.fillRect(0, 0, potong.width, potong.height);
+        c.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+        if (!pertama) pdf.addPage("a4", "portrait");
+        pertama = false;
+        pdf.addImage(potong.toDataURL("image/jpeg", 0.98), "JPEG", 0, atasMm, PW, h / pxPerMm, undefined, "FAST");
+        y = akhir; awal = false;
+      }
+    }
+    pdf.save(namaFile + ".pdf");
+}
+async function unduhSlipLengkap(id) {
+  const s = DB.riwayatSlip.find(x => x.id === id);
+  if (!s) return;
+  const toast = (m) => { try { (window.showToast || alert)(m); } catch (e) {} };
+  const hostRef = {};
+  try {
+    toast("Menyiapkan PDF…");
+    await bangunPdfDariHtml(`<div class="cetak-page">${buildSlipSheetHtml(s)}</div>` + buildLampiranStaffHtml(s), namaFileSlip(s), toast, hostRef);
+    toast("PDF berhasil diunduh");
+  } catch (err) {
+    console.error("Unduh PDF langsung gagal, memakai cetak:", err);
+    toast("Tidak bisa membuat PDF langsung, memakai dialog cetak…");
+    unduhSlipViaCetak(id);
+  } finally {
+    if (hostRef.el && hostRef.el.parentNode) hostRef.el.parentNode.removeChild(hostRef.el);
+  }
+}
+async function unduhLaporanPdf() {
+  const cont = document.getElementById("laporanContainer");
+  if (!cont || !cont.innerHTML.trim()) { window.print(); return; }
+  const toast = (m) => { try { (window.showToast || alert)(m); } catch (e) {} };
+  const periode = (document.getElementById("selLaporanPeriode") || {}).value || "";
+  const perLabel = String(periode).toLowerCase().replace(/(^|\s)(\S)/g, (m, a, b) => a + b.toUpperCase());
+  const pt = String((DB.config && DB.config.namaPerusahaan) || "").trim();
+  const nama = `Laporan Slip Gaji ${pt} - ${perLabel}`.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+  const hostRef = {};
+  try {
+    toast("Menyiapkan PDF…");
+    await bangunPdfDariHtml(cont.innerHTML, nama, toast, hostRef);
+    toast("PDF berhasil diunduh");
+  } catch (err) {
+    console.error("Unduh PDF laporan gagal, memakai cetak:", err);
+    toast("Tidak bisa membuat PDF langsung, memakai dialog cetak…");
+    window.print();
+  } finally {
+    if (hostRef.el && hostRef.el.parentNode) hostRef.el.parentNode.removeChild(hostRef.el);
+  }
 }
 
 function buatLaporanPeriode() {
@@ -3511,6 +3747,9 @@ function startPayrollApp() {
     const btn = e.target.closest("button");
     if (!btn) return;
     if (btn.dataset.action === "lihat-slip") lihatSlipRiwayat(btn.dataset.id);
+    if (btn.dataset.action === "unduh-slip") unduhSlipLengkap(btn.dataset.id);
+    if (btn.dataset.action === "salin-subjek") salinEmailSlip(btn.dataset.id, "subjek");
+    if (btn.dataset.action === "salin-isi") salinEmailSlip(btn.dataset.id, "isi");
     if (btn.dataset.action === "hapus-slip") hapusSlipRiwayat(btn.dataset.id);
     if (btn.dataset.action === "naik-slip") pindahUrutanRiwayat(btn.dataset.id, "naik");
     if (btn.dataset.action === "turun-slip") pindahUrutanRiwayat(btn.dataset.id, "turun");
@@ -3519,7 +3758,7 @@ function startPayrollApp() {
 
   // Laporan Periode
   document.getElementById("btnBuatLaporan").addEventListener("click", buatLaporanPeriode);
-  document.getElementById("btnPrintLaporan").addEventListener("click", () => window.print());
+  document.getElementById("btnPrintLaporan").addEventListener("click", unduhLaporanPdf);
 
   // Pengaturan
   document.getElementById("btnSimpanPengaturan").addEventListener("click", simpanPengaturan);

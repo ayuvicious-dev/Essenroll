@@ -783,7 +783,7 @@ tr.row-resign td:not(:last-child){opacity:.6;}
           <label>Alamat Baris 1<input type="text" id="cfgAlamat1"></label>
           <label>Alamat Baris 2<input type="text" id="cfgAlamat2"></label>
           <label>Alamat Baris 3<input type="text" id="cfgAlamat3"></label>
-          <label>Nama Pengirim Email Slip<input type="text" id="cfgEmailNamaPengirim" placeholder="Nama staf Finance &amp; HR"></label>
+          <label>Nama Pengirim Email Slip<input type="text" id="cfgEmailNamaPengirim" placeholder="Nama staf Finance"></label>
           <label>Nomor Telepon (tanda tangan email)<input type="text" id="cfgEmailTelepon"></label>
           <label>Alamat Email Pengirim (tanda tangan email)<input type="email" id="cfgEmailPengirim"></label>
           <label>Jam Masuk Standar<input type="time" id="cfgJamMasuk"></label>
@@ -2881,7 +2881,7 @@ function kirimEmailSlipRiwayat(id) {
     `Hormat kami,`,
     ``,
     cfg.emailNamaPengirim || "",
-    `Finance & HR Department`,
+    `Finance Department`,
     perusahaan,
     cfg.emailTelepon || "",
     cfg.emailPengirim || ""
@@ -2907,7 +2907,7 @@ function teksEmailSlip(s, jenis) {
     ``,
     `Regards,`,
     ``,
-    `Finance & HR Department`,
+    `Finance Department`,
     PERUSAHAAN_EMAIL
   ].join("\n");
 }
@@ -3295,6 +3295,8 @@ async function unduhSlipViaCetak(id) {
   }
 }
 
+// Muat pustaka PDF di latar belakang agar klik pertama sama cepat & sama hasilnya dengan klik berikutnya
+window.addEventListener("load", () => setTimeout(() => { try { siapkanLibPdf().catch(() => {}); } catch (e) {} }, 2500));
 // ---- Unduh langsung sebagai file PDF (tanpa dialog cetak). Isi & struktur sama persis dengan versi cetak. ----
 function muatSkrip(url) {
   return new Promise((ok, gagal) => {
@@ -3315,8 +3317,18 @@ async function bangunPdfDariHtml(html, namaFile, toast, hostRef) {
     host.innerHTML = html;
     document.body.appendChild(host);
     hostRef.el = host;
+    // Tunggu font & gambar benar-benar siap (klik pertama sering terlalu cepat sehingga font belum termuat)
+    const frame = () => new Promise(r => requestAnimationFrame(() => r()));
+    await frame(); await frame();
+    if (document.fonts && document.fonts.load) {
+      const fam = getComputedStyle(host).fontFamily || "sans-serif";
+      try { await Promise.all(["400","500","600","700","800"].map(w => document.fonts.load(`${w} 14px ${fam}`))); } catch (e) {}
+    }
     if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (e) {} }
     await tungguGambar(host);
+    await Promise.all(Array.from(host.querySelectorAll("img")).map(im => (im.decode ? im.decode().catch(() => {}) : 0)));
+    await new Promise(r => setTimeout(r, 400));
+    await frame();
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
     const PW = 210, PH = 297;

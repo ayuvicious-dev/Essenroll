@@ -783,7 +783,7 @@ tr.row-resign td:not(:last-child){opacity:.6;}
           <label>Alamat Baris 1<input type="text" id="cfgAlamat1"></label>
           <label>Alamat Baris 2<input type="text" id="cfgAlamat2"></label>
           <label>Alamat Baris 3<input type="text" id="cfgAlamat3"></label>
-          <label>Nama Pengirim Email Slip<input type="text" id="cfgEmailNamaPengirim" placeholder="Nama staf Finance"></label>
+          <label>Nama Pengirim Email Slip<input type="text" id="cfgEmailNamaPengirim" placeholder="Nama staf Finance &amp; HR"></label>
           <label>Nomor Telepon (tanda tangan email)<input type="text" id="cfgEmailTelepon"></label>
           <label>Alamat Email Pengirim (tanda tangan email)<input type="email" id="cfgEmailPengirim"></label>
           <label>Jam Masuk Standar<input type="time" id="cfgJamMasuk"></label>
@@ -2881,7 +2881,7 @@ function kirimEmailSlipRiwayat(id) {
     `Hormat kami,`,
     ``,
     cfg.emailNamaPengirim || "",
-    `Finance Department`,
+    `Finance & HR Department`,
     perusahaan,
     cfg.emailTelepon || "",
     cfg.emailPengirim || ""
@@ -2907,7 +2907,7 @@ function teksEmailSlip(s, jenis) {
     ``,
     `Regards,`,
     ``,
-    `Finance Department`,
+    `Finance & HR Department`,
     PERUSAHAAN_EMAIL
   ].join("\n");
 }

@@ -4070,19 +4070,30 @@ onAuthStateChanged(auth, (user) => {
 
 // Baca data dari snapshot: format lama (1 dokumen) atau format potongan (chunk).
 async function bacaDataSnapshot(snap) {
-  const d = snap.data();
+  let d = snap.data();
   if (!d || d.format !== 2) return { data: d, jumlahChunk: 0 };
-  const n = Number(d.chunkCount) || 0;
-  for (let percobaan = 0; percobaan < 3; percobaan++) {
+  const refUtama = doc(db, FIRESTORE_COLLECTION, FIRESTORE_DOC_ID);
+  let terakhir = "potongan belum lengkap";
+  for (let percobaan = 0; percobaan < 4; percobaan++) {
+    if (percobaan > 0) {
+      // manifest dari cache bisa lebih lama dari potongan di server: ambil yang terbaru
+      await new Promise((r) => setTimeout(r, 800));
+      const baru = await getDoc(refUtama);
+      if (!baru.exists()) throw new Error("Dokumen utama tidak ditemukan");
+      d = baru.data();
+      if (d.format !== 2) return { data: d, jumlahChunk: 0 };
+    }
+    const n = Number(d.chunkCount) || 0;
     const docs = await Promise.all(
       Array.from({ length: n }, (_, i) => getDoc(doc(db, FIRESTORE_COLLECTION, CHUNK_PREFIX + i)))
     );
-    if (n > 0 && docs.every((x) => x.exists() && x.data().rev === d.rev)) {
+    const hilang = docs.findIndex((x) => !x.exists());
+    if (n > 0 && hilang === -1 && docs.every((x) => x.data().rev === d.rev)) {
       return { data: JSON.parse(docs.map((x) => x.data().data).join("")), jumlahChunk: n };
     }
-    await new Promise((r) => setTimeout(r, 700)); // potongan belum lengkap/sinkron, coba lagi
+    terakhir = hilang !== -1 ? ("potongan #" + hilang + " tidak ada") : "versi potongan tidak cocok";
   }
-  throw new Error("Potongan data di cloud belum lengkap");
+  throw new Error(terakhir);
 }
 
 // Gabungkan data dari server ke window.DB (logika tombstone slip tetap sama).
@@ -4137,12 +4148,19 @@ async function prosesSnapshot(snap) {
     } catch (err) {
       console.error("Gagal memuat data dari cloud:", err);
       if (mySeq !== snapSeq) return;
+      const dariCache = !!(snap.metadata && snap.metadata.fromCache);
       setLoginBusy(false);
       showApp();
       window.startPayrollApp();
       appStarted = true;
+      if (dariCache && navigator.onLine !== false) {
+        // snapshot awal dari cache; snapshot terbaru dari server akan menyusul
+        updateSyncIndicator("online");
+        return;
+      }
       updateSyncIndicator("offline");
-      showSyncFailToast("⚠ Gagal memuat data dari cloud. Bekerja dengan data lokal.");
+      const penyebab = (err && (err.code || err.message)) || "error";
+      showSyncFailToast("⚠ Gagal memuat data dari cloud (" + penyebab + "). Bekerja dengan data lokal.");
       return;
     }
   }

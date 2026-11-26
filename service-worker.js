@@ -1,5 +1,5 @@
 // Naikkan CACHE_NAME setiap kali index.html diperbarui
-const CACHE_NAME = "essenroll-cache-v9";
+const CACHE_NAME = "essenroll-cache-v10";
 const ASSETS_TO_CACHE = [
   "./", "./index.html", "./manifest.json", "./xlsx.full.min.js",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-96.png",

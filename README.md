@@ -25,14 +25,20 @@ xlsx.full.min.js     pustaka SheetJS (impor Excel kehadiran)
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /essenroll/sharedData {
+    match /essenroll/{docId} {
       allow read, write: if request.auth != null;
     }
   }
 }
 ```
 
-Semua pengguna yang login berbagi satu dokumen data: `essenroll/sharedData`.
+Semua pengguna yang login berbagi data yang sama di koleksi `essenroll`:
+- Data kecil (di bawah ±600 KB) disimpan di satu dokumen `essenroll/sharedData`.
+- Data besar (foto surat sakit, riwayat slip, rekap kehadiran yang banyak) otomatis dipecah ke
+  beberapa dokumen `essenroll/sharedData_chunk_0`, `_1`, dst., karena satu dokumen Firestore
+  dibatasi 1 MiB. Karena itu aturan di atas memakai `{docId}` (bukan hanya `sharedData`).
+  Setelah mengganti Rules, klik **Publish**.
+- Setelah update ini, buka/refresh aplikasi di semua perangkat agar memakai versi terbaru.
 
 ## Deploy GitHub Pages
 Upload semua isi folder ke root repository → Settings → Pages → branch `main` / root.

@@ -3847,6 +3847,8 @@ import {
   doc,
   onSnapshot,
   setDoc,
+  getDoc,
+  writeBatch,
   serverTimestamp,
   enableIndexedDbPersistence
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
@@ -3876,6 +3878,56 @@ enableIndexedDbPersistence(db).catch(() => {
 let unsubscribeSnapshot = null;
 let saveTimer = null;
 let suppressNextAutoSave = false;
+
+/* ---------------------------------------------------------
+   PENYIMPANAN BERPOTONG (chunk)
+   Dokumen Firestore dibatasi 1 MiB. Karena seluruh data (foto surat sakit,
+   riwayat slip, rekap kehadiran) dulu disimpan dalam SATU dokumen, simpan
+   ke cloud gagal begitu ukurannya melewati batas itu. Sekarang:
+   - data kecil  -> tetap 1 dokumen "sharedData" (format lama)
+   - data besar  -> JSON dipotong jadi beberapa dokumen "sharedData_chunk_N"
+                    dan "sharedData" hanya berisi daftar potongan (manifest).
+   Semua ditulis atomik dalam satu batch.
+   --------------------------------------------------------- */
+const CHUNK_PREFIX = "sharedData_chunk_";
+const CHUNK_CHARS = 240000;        // aman < 1 MiB per dokumen walau banyak karakter non-ASCII
+const INLINE_MAX_CHARS = 600000;   // di bawah ini tetap 1 dokumen
+const MAKS_CHARS_TOTAL = 8000000;  // batas batch Firestore ±10 MiB
+const TIMEOUT_SIMPAN_MS = 45000;
+
+let lastChunkCount = 0;   // jumlah potongan yang ada di server (untuk hapus potongan lama)
+let editSeq = 0;          // naik setiap ada perubahan dari pengguna
+let snapSeq = 0;          // urutan pemrosesan snapshot
+let appStarted = false;
+
+function pecahTeks(teks) {
+  const out = [];
+  let i = 0;
+  while (i < teks.length) {
+    let end = Math.min(i + CHUNK_CHARS, teks.length);
+    if (end < teks.length) {
+      const c = teks.charCodeAt(end - 1);
+      if (c >= 0xD800 && c <= 0xDBFF) end--; // jangan memotong surrogate pair (emoji)
+    }
+    out.push(teks.slice(i, end));
+    i = end;
+  }
+  return out;
+}
+
+function pesanGagalSimpan(err) {
+  const kode = (err && err.code) || "";
+  if (kode === "permission-denied") {
+    return "⚠ Gagal menyimpan: ditolak server (permission-denied). Perbarui Rules Firestore sesuai README, atau login ulang.";
+  }
+  if (kode === "unavailable" || kode === "deadline-exceeded" || kode === "cancelled" || navigator.onLine === false) {
+    return "⚠ Belum tersimpan ke cloud — koneksi lambat/terputus. Data tetap aman di perangkat ini dan akan dikirim saat koneksi normal.";
+  }
+  if (kode === "invalid-argument" || kode === "resource-exhausted" || kode === "data-terlalu-besar") {
+    return "⚠ Gagal menyimpan: data terlalu besar untuk cloud (" + kode + "). Kurangi foto/riwayat lama, atau hubungi admin.";
+  }
+  return "⚠ Gagal menyimpan ke cloud (" + (kode || "error") + "). Data tetap aman di perangkat ini.";
+}
 
 const el = (id) => document.getElementById(id);
 
@@ -3986,6 +4038,9 @@ el("syncDot") && el("syncDot").addEventListener("click", () => {
 
 onAuthStateChanged(auth, (user) => {
   if (unsubscribeSnapshot) { unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+  appStarted = false;
+  snapSeq++;
+  lastChunkCount = 0;
 
   if (!user) {
     showLogin();
@@ -4000,100 +4055,189 @@ onAuthStateChanged(auth, (user) => {
 
   unsubscribeSnapshot = onSnapshot(
     ref,
-    (snap) => {
-      let perluPerbaikanBalik = false;
-      if (snap.exists()) {
-        const data = snap.data();
-        suppressNextAutoSave = true; // ini data DARI server, jangan ditulis balik
-
-        // Gabungkan daftar "tombstone" slip yang sudah dihapus (lokal + server)
-        // supaya slip yang sudah dihapus tidak bisa muncul lagi walau data
-        // yang datang dari server masih membawanya (mis. tertimpa oleh
-        // perangkat/tab lain yang belum sempat sinkron saat penghapusan terjadi).
-        const deletedLocal = window.DB.deletedSlipIds || [];
-        const deletedRemote = data.deletedSlipIds || [];
-        const deletedGabungan = Array.from(new Set([...deletedLocal, ...deletedRemote]));
-
-        const riwayatLocal = window.DB.riwayatSlip || [];
-        const riwayatRemote = data.riwayatSlip || [];
-        // Gabungkan berdasarkan id: slip yang HANYA ada di lokal (baru dibuat
-        // tapi belum sempat ter-flush ke server, misal karena halaman
-        // keburu di-refresh sebelum debounce selesai) tetap dipertahankan,
-        // supaya tidak tertimpa/hilang oleh data lama dari server.
-        const petaRiwayat = new Map();
-        riwayatRemote.forEach((s) => petaRiwayat.set(s.id, s));
-        let adaSlipLokalBelumSync = false;
-        riwayatLocal.forEach((s) => {
-          if (!petaRiwayat.has(s.id)) {
-            petaRiwayat.set(s.id, s);
-            adaSlipLokalBelumSync = true;
-          }
-        });
-        const riwayatGabungan = Array.from(petaRiwayat.values());
-        const riwayatBersih = riwayatGabungan.filter((s) => !deletedGabungan.includes(s.id));
-        perluPerbaikanBalik = adaSlipLokalBelumSync || riwayatBersih.length !== riwayatRemote.length;
-
-        Object.assign(window.DB, {
-          config: data.config || window.DB.config,
-          personalia: data.personalia || [],
-          suratSakit: data.suratSakit || [],
-          riwayatSlip: riwayatBersih,
-          kehadiranImport: data.kehadiranImport || {},
-          deletedSlipIds: deletedGabungan
-        });
-        localStorage.setItem("essenrollData_v1", JSON.stringify(window.DB));
-      }
-      setLoginBusy(false);
-      showApp();
-      window.startPayrollApp();
-      updateSyncIndicator("online");
-      setSyncDot(perluPerbaikanBalik ? "dirty" : "synced");
-
-      if (perluPerbaikanBalik) {
-        // Data di server masih membawa slip yang sudah dihapus — kirim balik
-        // versi yang sudah bersih supaya semua perangkat konsisten.
-        suppressNextAutoSave = false;
-        setTimeout(() => { if (window.flushDBSave) window.flushDBSave(); }, 0);
-      }
-    },
+    (snap) => { prosesSnapshot(snap); },
     (err) => {
       console.error("Firestore sync error:", err);
       setLoginBusy(false);
       showApp();
       window.startPayrollApp(); // tetap jalan pakai data localStorage kalau offline
+      appStarted = true;
       updateSyncIndicator("offline");
       showSyncFailToast("⚠ Tidak bisa terhubung ke server. Bekerja dalam mode offline dengan data lokal.");
     }
   );
 });
 
+// Baca data dari snapshot: format lama (1 dokumen) atau format potongan (chunk).
+async function bacaDataSnapshot(snap) {
+  const d = snap.data();
+  if (!d || d.format !== 2) return { data: d, jumlahChunk: 0 };
+  const n = Number(d.chunkCount) || 0;
+  for (let percobaan = 0; percobaan < 3; percobaan++) {
+    const docs = await Promise.all(
+      Array.from({ length: n }, (_, i) => getDoc(doc(db, FIRESTORE_COLLECTION, CHUNK_PREFIX + i)))
+    );
+    if (n > 0 && docs.every((x) => x.exists() && x.data().rev === d.rev)) {
+      return { data: JSON.parse(docs.map((x) => x.data().data).join("")), jumlahChunk: n };
+    }
+    await new Promise((r) => setTimeout(r, 700)); // potongan belum lengkap/sinkron, coba lagi
+  }
+  throw new Error("Potongan data di cloud belum lengkap");
+}
+
+// Gabungkan data dari server ke window.DB (logika tombstone slip tetap sama).
+// Mengembalikan true bila hasil gabungan perlu dikirim balik ke server.
+function terapkanDataServer(data) {
+  // Gabungkan daftar "tombstone" slip yang sudah dihapus (lokal + server)
+  // supaya slip yang sudah dihapus tidak bisa muncul lagi.
+  const deletedLocal = window.DB.deletedSlipIds || [];
+  const deletedRemote = data.deletedSlipIds || [];
+  const deletedGabungan = Array.from(new Set([...deletedLocal, ...deletedRemote]));
+
+  const riwayatLocal = window.DB.riwayatSlip || [];
+  const riwayatRemote = data.riwayatSlip || [];
+  // Slip yang HANYA ada di lokal (belum sempat ter-flush ke server) tetap dipertahankan.
+  const petaRiwayat = new Map();
+  riwayatRemote.forEach((s) => petaRiwayat.set(s.id, s));
+  let adaSlipLokalBelumSync = false;
+  riwayatLocal.forEach((s) => {
+    if (!petaRiwayat.has(s.id)) {
+      petaRiwayat.set(s.id, s);
+      adaSlipLokalBelumSync = true;
+    }
+  });
+  const riwayatBersih = Array.from(petaRiwayat.values()).filter((s) => !deletedGabungan.includes(s.id));
+  const perluPerbaikanBalik = adaSlipLokalBelumSync || riwayatBersih.length !== riwayatRemote.length;
+
+  Object.assign(window.DB, {
+    config: data.config || window.DB.config,
+    personalia: data.personalia || [],
+    suratSakit: data.suratSakit || [],
+    riwayatSlip: riwayatBersih,
+    kehadiranImport: data.kehadiranImport || {},
+    deletedSlipIds: deletedGabungan
+  });
+  try { localStorage.setItem("essenrollData_v1", JSON.stringify(window.DB)); } catch (e) { /* kuota penuh: abaikan */ }
+  return perluPerbaikanBalik;
+}
+
+async function prosesSnapshot(snap) {
+  // Gema dari tulisan kita sendiri (belum dikonfirmasi server): abaikan setelah app berjalan.
+  if (appStarted && snap.metadata.hasPendingWrites) return;
+
+  const mySeq = ++snapSeq;
+  const editAwal = editSeq;
+  let data = null;
+
+  if (snap.exists()) {
+    try {
+      const hasil = await bacaDataSnapshot(snap);
+      data = hasil.data;
+      lastChunkCount = hasil.jumlahChunk;
+    } catch (err) {
+      console.error("Gagal memuat data dari cloud:", err);
+      if (mySeq !== snapSeq) return;
+      setLoginBusy(false);
+      showApp();
+      window.startPayrollApp();
+      appStarted = true;
+      updateSyncIndicator("offline");
+      showSyncFailToast("⚠ Gagal memuat data dari cloud. Bekerja dengan data lokal.");
+      return;
+    }
+  }
+  if (mySeq !== snapSeq) return; // ada snapshot yang lebih baru
+
+  // Pengguna mengedit saat data sedang diunduh: jangan timpa editannya.
+  if (data && appStarted && editSeq !== editAwal) return;
+
+  let perluPerbaikanBalik = false;
+  if (data) {
+    suppressNextAutoSave = true; // ini data DARI server, jangan ditulis balik
+    perluPerbaikanBalik = terapkanDataServer(data);
+  }
+  setLoginBusy(false);
+  showApp();
+  window.startPayrollApp();
+  appStarted = true;
+  suppressNextAutoSave = false;
+  updateSyncIndicator("online");
+  setSyncDot(perluPerbaikanBalik ? "dirty" : "synced");
+
+  if (perluPerbaikanBalik) {
+    setTimeout(() => { if (window.flushDBSave) window.flushDBSave().catch(() => {}); }, 0);
+  }
+}
+
 // Dipanggil oleh app.js setiap kali saveDB() jalan (lihat hook window.onDBSaved)
 window.onDBSaved = function () {
   if (suppressNextAutoSave) { suppressNextAutoSave = false; return; }
+  editSeq++;
   setSyncDot("dirty");
   if (!auth.currentUser) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    doFirestoreSave();
+    doFirestoreSave().catch(() => {});
   }, 500);
 };
 
-function doFirestoreSave() {
-  if (!auth.currentUser) return Promise.resolve();
+async function doFirestoreSave() {
+  if (!auth.currentUser) return;
   setSyncDot("syncing");
-  const ref = doc(db, FIRESTORE_COLLECTION, FIRESTORE_DOC_ID);
-  return setDoc(ref, { ...window.DB, updatedAt: serverTimestamp(), updatedBy: auth.currentUser.email })
-    .then(() => {
-      updateSyncIndicator("online");
-      setSyncDot("synced");
-    })
-    .catch((err) => {
-      console.error("Gagal sync ke Firestore:", err);
-      updateSyncIndicator("offline");
-      setSyncDot("dirty");
-      showSyncFailToast("⚠ Gagal menyimpan ke cloud. Periksa koneksi internet — data tetap aman di perangkat ini.");
-      throw err;
-    });
+  try {
+    const teks = JSON.stringify(window.DB);
+    if (teks.length > MAKS_CHARS_TOTAL) {
+      const e = new Error("Data terlalu besar");
+      e.code = "data-terlalu-besar";
+      throw e;
+    }
+    const meta = { updatedAt: serverTimestamp(), updatedBy: auth.currentUser.email };
+    const refUtama = doc(db, FIRESTORE_COLLECTION, FIRESTORE_DOC_ID);
+    let batch = writeBatch(db);
+    let jumlah = 0;
+    let inlineOk = false;
+
+    if (teks.length <= INLINE_MAX_CHARS) {
+      try {
+        batch.set(refUtama, { ...JSON.parse(teks), ...meta }); // format lama: 1 dokumen
+        inlineOk = true;
+      } catch (e) {
+        console.warn("Format 1 dokumen ditolak, pakai format potongan:", e);
+        batch = writeBatch(db);
+      }
+    }
+    if (!inlineOk) {
+      const rev = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const potongan = pecahTeks(teks);
+      jumlah = potongan.length;
+      potongan.forEach((p, i) => batch.set(doc(db, FIRESTORE_COLLECTION, CHUNK_PREFIX + i), { rev, i, data: p }));
+      batch.set(refUtama, { format: 2, rev, chunkCount: jumlah, ...meta });
+    }
+    // hapus potongan lama yang tidak terpakai lagi
+    for (let i = jumlah; i < lastChunkCount; i++) {
+      batch.delete(doc(db, FIRESTORE_COLLECTION, CHUNK_PREFIX + i));
+    }
+
+    const commit = batch.commit();
+    commit.catch(() => {}); // cegah unhandled rejection bila kalah dari timeout
+    lastChunkCount = jumlah;
+    await Promise.race([
+      commit,
+      new Promise((_, reject) => setTimeout(() => {
+        const e = new Error("Waktu habis menunggu server");
+        e.code = "deadline-exceeded";
+        reject(e);
+      }, TIMEOUT_SIMPAN_MS))
+    ]);
+    updateSyncIndicator("online");
+    setSyncDot("synced");
+  } catch (err) {
+    console.error("Gagal sync ke Firestore:", err);
+    updateSyncIndicator("offline");
+    setSyncDot("dirty");
+    showSyncFailToast(pesanGagalSimpan(err));
+    throw err;
+  }
 }
 
 // Dipanggil dari app.js untuk aksi kritikal (mis. Simpan Pengaturan) supaya
